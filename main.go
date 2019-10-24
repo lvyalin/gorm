@@ -84,7 +84,7 @@ func Open(dialect string, args ...interface{}) (db *DB, err error) {
 
 	db = &DB{
 		db:        dbSQL,
-		logger:    defaultLogger,
+		logger:    DefaultLogger,
 		callbacks: DefaultCallback,
 		dialect:   newDialect(dialect, dbSQL),
 	}
@@ -230,6 +230,10 @@ func (s *DB) SubQuery() *SqlExpr {
 // Where return a new relation, filter records with given conditions, accepts `map`, `struct` or `string` as conditions, refer http://jinzhu.github.io/gorm/crud.html#query
 func (s *DB) Where(query interface{}, args ...interface{}) *DB {
 	return s.clone().search.Where(query, args...).db
+}
+
+func (s *DB) Ctx(ctx context.Context) *DB {
+	return s.clone().search.Ctx(ctx).db
 }
 
 // Or filter records that match before conditions or this one, similar to `Where`
@@ -842,13 +846,25 @@ func (s *DB) print(v ...interface{}) {
 }
 
 func (s *DB) log(v ...interface{}) {
-	if s != nil && s.logMode == detailedLogMode {
-		s.print(append([]interface{}{"log", fileWithLineNum()}, v...)...)
+	if s.logMode == detailedLogMode {
+		if s.search.ctx == nil {
+			s.print("log", nil, fileWithLineNum(), v)
+		} else if reflect.ValueOf(s.search.ctx).IsNil() {
+			s.print("log", nil, fileWithLineNum(), v)
+		} else {
+			s.print("log", s.search.ctx, fileWithLineNum(), v)
+		}
 	}
 }
 
 func (s *DB) slog(sql string, t time.Time, vars ...interface{}) {
 	if s.logMode == detailedLogMode {
-		s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected)
+		if s.search.ctx == nil {
+			s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected)
+		} else if reflect.ValueOf(s.search.ctx).IsNil() {
+			s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected)
+		} else if s.search.ctx.Value("NOLOGFlAG") != true {
+			s.print("sql", fileWithLineNum(), NowFunc().Sub(t), sql, vars, s.RowsAffected, s.search.ctx)
+		}
 	}
 }

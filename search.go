@@ -1,6 +1,7 @@
 package gorm
 
 import (
+	"context"
 	"fmt"
 )
 
@@ -24,6 +25,7 @@ type search struct {
 	raw              bool
 	Unscoped         bool
 	ignoreOrderQuery bool
+	ctx              context.Context
 }
 
 type searchPreload struct {
@@ -136,6 +138,15 @@ func (s *search) unscoped() *search {
 func (s *search) Table(name string) *search {
 	s.tableName = name
 	return s
+}
+
+func (s *search) Ctx(ctx context.Context) *search {
+	s.ctx = ctx
+	return s
+}
+
+func (s *search) GetCtx() context.Context {
+	return s.ctx
 }
 
 func (s *search) getInterfaceAsSQL(value interface{}) (str string) {
