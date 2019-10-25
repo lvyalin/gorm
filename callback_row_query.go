@@ -29,8 +29,11 @@ func rowQueryCallback(scope *Scope) {
 
 		if rowResult, ok := result.(*RowQueryResult); ok {
 			rowResult.Row = scope.SQLDB().QueryRow(scope.SQL, scope.SQLVars...)
+			scope.db.RowsAffected = 1
 		} else if rowsResult, ok := result.(*RowsQueryResult); ok {
 			rowsResult.Rows, rowsResult.Error = scope.SQLDB().Query(scope.SQL, scope.SQLVars...)
+			// !!! HACK ME  对于使用rows和row获取类似原生row的方式，没有办法知道到底有多少行，所以以-1位代替
+			scope.db.RowsAffected = -1
 		}
 	}
 }

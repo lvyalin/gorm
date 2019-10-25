@@ -1,7 +1,9 @@
 package gorm
 
 import (
+	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -13,9 +15,10 @@ import (
 )
 
 var (
-	defaultLogger            = Logger{log.New(os.Stdout, "\r\n", 0)}
+	DefaultLogger            = Logger{log.New(os.Stdout, "", 0)}
 	sqlRegexp                = regexp.MustCompile(`\?`)
 	numericPlaceHolderRegexp = regexp.MustCompile(`\$\d+`)
+	timestampFormat          = "2006-02-01 15:04:05.000"
 )
 
 func isPrintable(s string) bool {
@@ -25,6 +28,112 @@ func isPrintable(s string) bool {
 		}
 	}
 	return true
+}
+
+var LogJsonFormatter = func(values ...interface{}) (messages []interface{}) {
+	if len(values) > 1 {
+		if values[0] == "sql" {
+			var sql string
+			var formattedValues []string
+
+			// sql
+			for _, value := range values[4].([]interface{}) {
+				indirectValue := reflect.Indirect(reflect.ValueOf(value))
+				if indirectValue.IsValid() {
+					value = indirectValue.Interface()
+					if t, ok := value.(time.Time); ok {
+						formattedValues = append(formattedValues, fmt.Sprintf("'%v'", t.Format("2006-01-02 15:04:05")))
+					} else if b, ok := value.([]byte); ok {
+						if str := string(b); isPrintable(str) {
+							formattedValues = append(formattedValues, fmt.Sprintf("'%v'", str))
+						} else {
+							formattedValues = append(formattedValues, "'<binary>'")
+						}
+					} else if r, ok := value.(driver.Valuer); ok {
+						if value, err := r.Value(); err == nil && value != nil {
+							formattedValues = append(formattedValues, fmt.Sprintf("'%v'", value))
+						} else {
+							formattedValues = append(formattedValues, "NULL")
+						}
+					} else {
+						switch value.(type) {
+						case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, float32, float64, bool:
+							formattedValues = append(formattedValues, fmt.Sprintf("%v", value))
+						default:
+							formattedValues = append(formattedValues, fmt.Sprintf("'%v'", value))
+						}
+					}
+				} else {
+					formattedValues = append(formattedValues, "NULL")
+				}
+			}
+
+			// differentiate between $n placeholders or else treat like ?
+			if numericPlaceHolderRegexp.MatchString(values[3].(string)) {
+				sql = values[3].(string)
+				for index, value := range formattedValues {
+					placeholder := fmt.Sprintf(`\$%d([^\d]|$)`, index+1)
+					sql = regexp.MustCompile(placeholder).ReplaceAllString(sql, value+"$1")
+				}
+			} else {
+				formattedValuesLength := len(formattedValues)
+				for index, value := range sqlRegexp.Split(values[3].(string), -1) {
+					sql += value
+					if index < formattedValuesLength {
+						sql += formattedValues[index]
+					}
+				}
+			}
+
+			//requestId
+			var requestId interface{}
+			if len(values) >= 7 && values[6] != nil {
+				requestId = values[6].(context.Context).Value("requestId")
+			}
+
+			log, _ := json.Marshal(map[string]interface{}{
+				"time":        NowFunc().Format(timestampFormat),
+				"level":       "debug",
+				"module":      "gorm",
+				"requestId":   requestId,
+				"sql":         sql,
+				"duration":    float64(values[2].(time.Duration).Nanoseconds()/1e4) / 100.0,
+				"affectedrow": values[5].(int64),
+			})
+
+			return []interface{}{string(log)}
+		} else if values[0] == "log" {
+			ctx := values[1]
+			fileLineNum := values[2]
+			vars := values[3].([]interface{})
+			var requestId interface{}
+			if ctx != nil {
+				requestId = ctx.(context.Context).Value("requestId")
+			}
+			level := "info"
+			var msg interface{}
+			msg = values[3]
+			if len(vars) == 1 {
+				var ok bool
+				msg, ok = vars[0].(error)
+				if ok {
+					level = "error"
+				}
+			}
+
+			log, _ := json.Marshal(map[string]interface{}{
+				"time":      NowFunc().Format(timestampFormat),
+				"level":     level,
+				"module":    "gorm",
+				"requestId": requestId,
+				"msg":       msg,
+				"file":      fileLineNum,
+			})
+			return []interface{}{string(log)}
+		}
+	}
+
+	return
 }
 
 var LogFormatter = func(values ...interface{}) (messages []interface{}) {
@@ -124,5 +233,5 @@ type Logger struct {
 
 // Print format & print log
 func (logger Logger) Print(values ...interface{}) {
-	logger.Println(LogFormatter(values...)...)
+	logger.Println(LogJsonFormatter(values...)...)
 }
