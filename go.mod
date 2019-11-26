@@ -1,4 +1,4 @@
-module github.com/lvyalin/gorm
+module gorm
 
 go 1.12
 
